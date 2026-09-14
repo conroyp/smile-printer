@@ -1,0 +1,23 @@
+{
+  "name": "smile-printer",
+  "version": "1.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "description": "A privacy-first smile discount demo for Stripe Terminal and the Verifone V660p.",
+  "scripts": {
+    "dev": "node --watch server/index.js",
+    "start": "node server/index.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20.11"
+  },
+  "dependencies": {
+    "@mediapipe/tasks-vision": "^1.0.1",
+    "dotenv": "^17.2.2",
+    "express": "^5.1.0",
+    "sharp": "^0.35.4",
+    "stripe": "^22.6.2"
+  }
+}
