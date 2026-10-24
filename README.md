@@ -1,83 +1,49 @@
 # Smile Printer
 
-A small reference app that rewards a smile with 10% off a coffee, takes an in-person payment with Stripe Terminal, and prints the customer’s photo on a Verifone V660p receipt.
+Smile at the till for 10% off your coffee, pay on a Stripe Terminal reader, and get a receipt with your photo printed on it.
 
-Face detection and smile analysis happen in the browser. Live camera frames and face landmarks are never sent to this server or to Stripe.
+Face and smile detection run entirely in the browser. Live video never leaves the device.
 
-> This is an educational reference implementation, not a ready-made point-of-sale system. See [Before using this in production](#before-using-this-in-production).
+![The Smile Coffee till: a smiling face outlined in green, the 10% discount applied, and a dithered receipt preview](docs/smile-coffee-till.jpg)
 
-## The experience
+## Read the write-up
 
-1. The operator chooses how many coffees are in the order.
-2. The customer holds still while the face outline changes from red to orange.
-3. Holding a smile for one second turns the outline green, captures one photo, and applies the discount.
-4. The operator selects an online V660p and presses **Pay**.
-5. The Node server asks the reader to process a card-present PaymentIntent and waits for confirmed success.
-6. Only then does the browser upload the receipt image for printing. A successful print resets the order.
+This is the companion code for a two-part series on [conroyp.com](https://www.conroyp.com):
 
-If no compatible online reader is available, the Pay button remains disabled. If payment succeeds but printing fails, the same receipt can be retried without creating another charge.
-
-## What is in the demo?
-
-- Plain HTML and browser JavaScript with Tailwind’s browser CDN—no build step
-- Native `getUserMedia()` camera capture
-- MediaPipe Face Landmarker running in a dedicated Web Worker
-- A red → orange → green face and smile state machine
-- Browser-side portrait processing tuned for a monochrome thermal printer
-- A small Express server using the Stripe Node library
-- Server-driven Terminal payment processing and completion polling
-- V660p `print_content` submission and print-result polling
-- Tests for the HTTP API, payment flow, printing, worker lifecycle, and image processing
-
-The browser does not load the Stripe Terminal JavaScript SDK. The V660p is a smart reader, so this project uses Stripe’s [server-driven integration](https://docs.stripe.com/terminal/payments/collect-card-payment?terminal-sdk-platform=server-driven): the browser calls this app’s API, the API calls Stripe, and the reader communicates with Stripe over the internet.
-
-## Prerequisites
-
-- Node.js 20.11 or newer
-- A Stripe account and test-mode secret key
-- A V660p registered to the same Stripe account and showing as online
-- A modern browser with camera access
-
-V660p and embedded printing availability varies by country and can be preview-only. Check Stripe’s current [V660p availability and setup guide](https://docs.stripe.com/terminal/payments/setup-reader/v660p) before starting.
+1. **[Smile for 10% Off: Private Face Detection in the Browser](https://www.conroyp.com/articles/private-face-detection-browser-smile-discount)** - the camera, native `FaceDetector` vs MediaPipe, the smile state machine, moving the model into a Web Worker, and where the privacy boundary sits.
+2. **[From Smile to Receipt: Stripe Terminal Payments and Printing](https://www.conroyp.com/articles/stripe-terminal-v660p-payments-receipt-printing)** - server-driven payments on a Verifone V660p, idempotent retries, and dithering a photo for a one-bit thermal printer.
 
 ## Quick start
 
-Install dependencies and create a local environment file:
+You'll need Node.js 20.11 or newer, and a browser with a camera.
 
 ```bash
 npm install
 cp .env.example .env
-```
-
-Add your Stripe test key to `.env`:
-
-```dotenv
-STRIPE_SECRET_KEY=sk_test_...
-```
-
-Start the app:
-
-```bash
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). `localhost` is treated as a secure browser context, so camera access works without a local TLS certificate. Use HTTPS for any other hostname.
+Open [http://localhost:3000](http://localhost:3000), allow camera access, hold still, and smile.
 
-## Configuration
+**No Stripe key or card reader needed to try the smile detection.** Without them, the discount, photo capture and receipt preview all work - the Pay button just stays disabled until the server can find a printer.
 
-| Variable | Default | Purpose |
-|---|---:|---|
-| `STRIPE_SECRET_KEY` | — | Server-side Stripe secret key; required |
-| `STRIPE_CONNECTED_ACCOUNT_ID` | — | Connected account that owns the reader, if using Connect |
-| `STRIPE_CURRENCY` | `eur` | Three-letter payment currency |
-| `COFFEE_PRICE` | `430` | Unit price in the currency’s smallest unit |
-| `PORT` | `3000` | HTTP port |
-| `PAYMENT_POLL_ATTEMPTS` | `90` | Maximum PaymentIntent and reader status checks |
-| `PAYMENT_POLL_INTERVAL_MS` | `1000` | Delay between payment checks |
-| `PRINT_POLL_ATTEMPTS` | `15` | Maximum print status checks |
-| `PRINT_POLL_INTERVAL_MS` | `1000` | Delay between print checks |
+There's no build step. The frontend is plain HTML and JavaScript, styled with [Tailwind's browser build](https://tailwindcss.com/docs/installation/play-cdn), and the server serves MediaPipe straight from `node_modules`.
 
-The default price is €4.30. In Stripe test mode, amount endings trigger particular payment outcomes; €4.30 keeps the normal and discounted totals for one to four coffees away from those special endings.
+## Taking payments and printing
+
+To go all the way to a printed receipt, you'll also need:
+
+- A Stripe account, with a **test-mode** secret key in `.env`:
+
+  ```dotenv
+  STRIPE_SECRET_KEY=sk_test_...
+  ```
+
+- A **Verifone V660p**, registered to the same Stripe account and showing as online. It's a card reader with a built-in thermal printer. Availability varies by country, so check Stripe's [V660p setup guide](https://docs.stripe.com/terminal/payments/setup-reader/v660p) first.
+
+Restart the server, pick the reader from the **Receipt printer** dropdown, and press **Pay**. Tap a [Stripe physical test card](https://docs.stripe.com/terminal/references/testing#physical-test-cards) on the reader, and the receipt prints once the payment succeeds.
+
+<p align="center"><img src="docs/printed-receipt.jpg" width="320" alt="A thermal receipt from Smile Coffee with a dithered photo of a grinning customer, two house coffees, a 10% smile discount and a total of €7.74"></p>
 
 ## How it works
 
@@ -92,91 +58,59 @@ Browser                           Node server                     Stripe / V660p
    │                                   │── poll reader + intent ───────>│
    │<── confirmed payment ─────────────│<───────────────────────────────│
    │                                   │                                │
-   │── POST /api/receipts/print ──────>│── validate + optimize image    │
+   │── POST /api/receipts/print ──────>│── validate + optimise image    │
    │                                   │── submit print_content ───────>│
    │                                   │── poll print action ──────────>│
    │<── confirmed print ───────────────│<───────────────────────────────│
-   │  reset order                      │                                │
 ```
 
-### Browser responsibilities
+- **The browser** runs [MediaPipe Face Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker/web_js) in a Web Worker, sending at most one camera frame at a time. Once a face has held still for 1.5 seconds and smiled for one, it captures a single photo, and draws a 384px black and white receipt with a dithered copy of it.
+- **The server** keeps the Stripe secret key out of the browser, works out the price itself, and uses Stripe's [server-driven Terminal integration](https://docs.stripe.com/terminal/payments/collect-card-payment?terminal-sdk-platform=server-driven) to take the payment. Only once the payment has succeeded does it accept the receipt image, which it checks with [Sharp](https://sharp.pixelplumbing.com/) before sending it to the reader's printer.
+- **Retries are safe.** Payments use an idempotency key, so "Check payment" after a timeout never charges twice, and "Retry receipt" after a printer jam only reprints.
 
-- Capture camera frames and transfer at most one frame at a time to the worker.
-- Track face position and smile duration.
-- Keep the captured photo in memory.
-- Render a 384px-wide, black-and-white receipt canvas.
-- Submit order choices and, after payment, the completed receipt image.
+| File | What's in it |
+|---|---|
+| [`frontend/app.js`](frontend/app.js) | UI, camera, and the face/smile state machine |
+| [`frontend/face-detector.js`](frontend/face-detector.js) | Talks to the worker, one frame at a time, and cleans up on page exit |
+| [`frontend/face-landmarker.worker.js`](frontend/face-landmarker.worker.js) | MediaPipe, returning just a face box and smile score |
+| [`frontend/receipt.js`](frontend/receipt.js), [`receipt-image.js`](frontend/receipt-image.js) | Receipt layout, and photo prep + Atkinson dithering |
+| [`server/app.js`](server/app.js) | Express routes and request validation |
+| [`server/terminal-service.js`](server/terminal-service.js) | Stripe payments, reader polling and printing |
 
-### Server responsibilities
+## Privacy
 
-- Keep the Stripe secret key out of the browser.
-- Recalculate the charge from the configured price, quantity, and discount state.
-- Find online readers whose `device_type` is `verifone_v660p`.
-- Create and process a card-present PaymentIntent.
-- Confirm both the reader action and PaymentIntent before accepting the receipt.
-- Bind the paid PaymentIntent to the reader selected for the order.
-- Validate and optimize the receipt before calling Stripe’s [`print_content` endpoint](https://docs.stripe.com/terminal/features/print-content?locale=en-GB).
-
-## API
-
-| Method | Path | Purpose |
+| Data | Where it's processed | Leaves the browser? |
 |---|---|---|
-| `GET` | `/api/health` | Basic process health check |
-| `GET` | `/api/config` | Publish safe shop settings to the browser |
-| `GET` | `/api/printers` | List compatible online V660p readers |
-| `POST` | `/api/payments` | Create, process, and await a Terminal payment |
-| `POST` | `/api/receipts/print` | Verify the payment, optimize the image, and await printing |
+| Live video frames | Web Worker | No |
+| Face position and smile score | Web Worker | No |
+| Captured photo | Browser memory | Only after payment, as part of the receipt |
+| Receipt image | Our server, then Stripe | Yes, to be printed |
 
-## Privacy boundary
+The app never writes photos or receipts to disk. The page also loads Tailwind from jsDelivr, fonts from Google Fonts, and the face model from Google's model storage, but no camera frames are sent with any of those requests.
 
-| Data | Where it is processed | Leaves the browser? |
+## Configuration
+
+All optional, apart from `STRIPE_SECRET_KEY` for payments. See [`.env.example`](.env.example).
+
+| Variable | Default | Purpose |
 |---|---|---|
-| Live video frames | Browser worker | No |
-| Face landmarks and smile score | Browser worker | No |
-| Captured portrait | Browser memory | Only after payment, as part of the receipt |
-| Receipt image | Node server and Stripe | Yes, solely for printing |
-| Payment details | Stripe and the V660p | Yes |
+| `STRIPE_SECRET_KEY` | - | Server-side Stripe secret key |
+| `STRIPE_CONNECTED_ACCOUNT_ID` | - | The connected account that owns the reader, if you're using Connect |
+| `STRIPE_CURRENCY` | `eur` | Payment currency |
+| `COFFEE_PRICE` | `430` | Price per coffee, in the currency's smallest unit (cents) |
+| `PORT` | `3000` | HTTP port |
+| `PAYMENT_POLL_ATTEMPTS` / `PAYMENT_POLL_INTERVAL_MS` | `90` / `1000` | How long to wait for a payment |
+| `PRINT_POLL_ATTEMPTS` / `PRINT_POLL_INTERVAL_MS` | `15` / `1000` | How long to wait for a print |
 
-MediaPipe is installed from npm and served locally by this app. The browser loads Tailwind’s development runtime from jsDelivr, fonts from Google Fonts, and the face model from Google’s model storage, but video frames are not sent with those requests. This app does not write captured images or generated receipts to disk, and the browser discards its in-memory copy when the order resets.
+Why €4.30? Stripe's test card uses the last two digits of the amount to simulate outcomes like declines. €4.30 keeps the totals for one to four coffees, with or without the discount, clear of those special endings. If you change the price and a test payment is declined, check the [test amounts](https://docs.stripe.com/terminal/references/testing#physical-test-cards) before debugging anything else.
 
-## Implementation notes
+## Troubleshooting
 
-### Face detection lifecycle
+**The camera doesn't start.** Use `localhost` or HTTPS, allow camera access in the browser's site settings, and close any other app that's using the camera.
 
-[`FaceDetectorClient`](frontend/face-detector.js) uses `requestVideoFrameCallback()` when available and allows only one transferable `ImageBitmap` to be in flight. Face Landmarker inference runs inside [`face-landmarker.worker.js`](frontend/face-landmarker.worker.js), which returns only a normalized face box and smile score.
+**No printers in the dropdown.** Check the V660p is powered on, online in the Stripe Dashboard, and registered to the same account and mode (test or live) as your key. If you're using Connect, set `STRIPE_CONNECTED_ACCOUNT_ID`.
 
-Initialization tries the MediaPipe GPU delegate, then creates a fresh CPU worker if GPU setup fails. On `pagehide`, the app cancels frame callbacks, stops every camera track, clears the video element, and terminates the worker. It intentionally avoids calling MediaPipe’s synchronous `close()` during navigation because that call has [been reported to freeze browser processes](https://github.com/google-ai-edge/mediapipe/issues/5718).
-
-### Payment and retry safety
-
-The server calculates the amount rather than accepting an arbitrary total from the browser. A browser-generated idempotency key is reused when a payment request is retried. The server waits for the reader action and then the PaymentIntent to report success before the receipt endpoint can print. If polling or the browser request times out, the order remains locked and the main action changes to **Check payment**, which reuses the original key rather than starting a new checkout.
-
-If printing fails, the browser keeps the paid PaymentIntent ID and changes the main action to **Retry receipt**. That path calls only the print endpoint; it does not create another PaymentIntent.
-
-### Receipt image treatment
-
-[`receipt.js`](frontend/receipt.js) owns the receipt layout. [`receipt-image.js`](frontend/receipt-image.js) scales the portrait to fit within 320 × 410 pixels, normalizes its 2nd and 98th luminance percentiles, lifts shadows with a gamma of 0.8, applies a small unsharp mask, and converts it to exact black and white pixels with serpentine Atkinson dithering.
-
-The server uses Sharp to enforce Stripe’s printing constraints: a 384px-wide, two-colour PNG no larger than 100KB. The receipt ends with 72 blank pixels so its footer clears the tear bar. Both the image profile and feed length are named constants near the top of their respective modules.
-
-## Project structure
-
-```text
-frontend/
-  index.html                  Page structure
-  app.js                     UI, camera, and transaction orchestration
-  face-detector.js           Main-thread worker client and lifecycle
-  face-landmarker.worker.js  MediaPipe inference
-  receipt.js                 Receipt layout and rendering
-  receipt-image.js           Portrait normalization and dithering
-server/
-  index.js                   Process entry point
-  app.js                     Express routes and request validation
-  config.js                  Environment configuration
-  terminal-service.js        Stripe payments and printing
-  errors.js                  Safe public error responses
-test/                         Node test suite
-```
+**The payment worked, but nothing printed.** Fix the paper, cover or connection, then press **Retry receipt**. It only reprints - the customer isn't charged again.
 
 ## Tests
 
@@ -184,46 +118,16 @@ test/                         Node test suite
 npm test
 ```
 
-The suite uses Node’s built-in test runner and mocked Stripe services. It does not make payments, contact a physical reader, or require a Stripe key.
+Node's built-in test runner, with a mocked Stripe client. No key, reader or network needed.
 
-## Troubleshooting
+## Not production-ready
 
-### No compatible printers found
+This is a deliberately small demo. A real till would also need operator authentication, HTTPS, compiled CSS instead of Tailwind's browser build ([here's how](https://www.conroyp.com/articles/tailwind-cdn-to-production-optimised-css-bundle)), webhooks and durable order state rather than holding a request open while polling, refund and cancellation handling, and a proper look at consent and privacy for receipt photos. The discount flag is also taken on trust from the browser - checking it server-side would mean sending the customer's face to the server, which this demo is deliberately avoiding.
 
-- Confirm the V660p is registered, powered on, connected, and marked online in Stripe.
-- Confirm `.env` contains a key for the same test or live mode as the reader.
-- If using Connect, set `STRIPE_CONNECTED_ACCOUNT_ID` to the account that owns the reader.
-- Confirm V660p support is enabled for your Stripe account and region.
+## More like this
 
-### The camera does not start
+Smile Coffee grew out of my talk [Delete Your Dependencies: What the Browser Can Do Now](https://www.conroyp.com/speaking/delete-your-dependencies-what-the-browser-can-do-now). Its demo app, [conroyp/delete-your-dependencies](https://github.com/conroyp/delete-your-dependencies), has a browser-only version of the smile check, alongside QR scanning, Web Bluetooth printing, on-device AI and more.
 
-- Use `localhost` or HTTPS.
-- Allow camera access in the browser’s site settings.
-- Close another application if it has exclusive use of the camera.
-- Reload after changing permissions. The page lifecycle cleanup stops camera tracks and terminates the inference worker during navigation.
-
-### A test payment is declined
-
-Stripe Terminal uses the last two digits of test amounts to simulate outcomes. The default coffee price avoids the special endings for the most common one-to-four-coffee cases. If you change `COFFEE_PRICE`, check Stripe’s [Terminal testing guidance](https://docs.stripe.com/terminal/payments/collect-card-payment?terminal-sdk-platform=server-driven) before assuming the integration is failing.
-
-### Payment succeeded but the receipt did not print
-
-The operator can resolve the paper, cover, connectivity, or busy state and press **Retry receipt**. The app retains the successful PaymentIntent and does not charge the customer again.
-
-## Before using this in production
-
-This repository deliberately stays small enough to explain. A production deployment should also include:
-
-- Operator authentication and authorization
-- Compiled CSS in place of Tailwind’s development-only browser CDN
-- HTTPS, rate limiting, request logging, and monitoring
-- A consent and retention policy appropriate to receipt photographs
-- A server-verifiable discount claim instead of trusting the browser flag
-- Durable transaction state and webhook-backed recovery across browser or server restarts
-- Reconciliation, refund, cancellation, and abandoned-payment handling
-- A legal and regional review of receipt content and biometric/privacy obligations
-- Your own product copy, branding, accessibility review, and end-to-end reader tests
-
-## License
+## Licence
 
 [MIT](LICENSE) © 2026 Paul Conroy

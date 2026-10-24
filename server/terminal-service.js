@@ -43,7 +43,8 @@ export class TerminalService {
   }
 
   isPrintable(reader) {
-    return reader?.device_type === "verifone_v660p";
+    // Match any device starting with verifone_v660p (should support future variants like verifone_v660p_2 or _devkit)
+    return reader?.device_type?.startsWith("verifone_v660p");
   }
 
   async listPrinters() {
@@ -93,7 +94,7 @@ export class TerminalService {
 
   async takePayment({ readerId, amount, quantity, discountApplied, idempotencyKey }) {
     const reader = await this.retrieveUsablePrinter(readerId);
-    const paymentIntent = await this.stripe.paymentIntents.create(
+    const createdIntent = await this.stripe.paymentIntents.create(
       {
         amount,
         currency: this.config.currency,
@@ -107,6 +108,15 @@ export class TerminalService {
         },
       },
       this.requestOptions({ idempotencyKey: `smile-printer:${idempotencyKey}:intent` }),
+    );
+
+    // A retried request replays the original create response, which always reports
+    // requires_payment_method. Read the current state so a completed payment isn't
+    // sent back to the reader.
+    const paymentIntent = await this.stripe.paymentIntents.retrieve(
+      createdIntent.id,
+      {},
+      this.requestOptions(),
     );
 
     if (paymentIntent.status === "succeeded") {

@@ -58,6 +58,7 @@ describe("TerminalService", () => {
   it("waits for both the reader action and PaymentIntent success", async () => {
     let readerRetrievals = 0;
     let processedIntent = null;
+    let submitted = false;
     const stripe = {
       terminal: {
         readers: {
@@ -84,6 +85,7 @@ describe("TerminalService", () => {
           },
           async processPaymentIntent(_readerId, params) {
             processedIntent = params.payment_intent;
+            submitted = true;
             return {
               action: {
                 type: "process_payment_intent",
@@ -99,7 +101,9 @@ describe("TerminalService", () => {
           return { id: "pi_example", status: "requires_payment_method" };
         },
         async retrieve() {
-          return { id: "pi_example", status: "succeeded", amount: 765, currency: "eur" };
+          return submitted
+            ? { id: "pi_example", status: "succeeded", amount: 765, currency: "eur" }
+            : { id: "pi_example", status: "requires_payment_method" };
         },
       },
     };
@@ -117,6 +121,7 @@ describe("TerminalService", () => {
   });
 
   it("checks the PaymentIntent after an ambiguous reader connection error", async () => {
+    let submitted = false;
     const stripe = {
       terminal: {
         readers: {
@@ -124,6 +129,7 @@ describe("TerminalService", () => {
             return { id: "tmr_v660p", device_type: "verifone_v660p", status: "online" };
           },
           async processPaymentIntent() {
+            submitted = true;
             return {
               action: {
                 type: "process_payment_intent",
@@ -140,7 +146,9 @@ describe("TerminalService", () => {
           return { id: "pi_example", status: "requires_payment_method" };
         },
         async retrieve() {
-          return { id: "pi_example", status: "succeeded", amount: 765, currency: "eur" };
+          return submitted
+            ? { id: "pi_example", status: "succeeded", amount: 765, currency: "eur" }
+            : { id: "pi_example", status: "requires_payment_method" };
         },
       },
     };
@@ -158,6 +166,7 @@ describe("TerminalService", () => {
   });
 
   it("checks the PaymentIntent after reader polling times out", async () => {
+    let submitted = false;
     const stripe = {
       terminal: {
         readers: {
@@ -165,6 +174,7 @@ describe("TerminalService", () => {
             return { id: "tmr_v660p", device_type: "verifone_v660p", status: "online" };
           },
           async processPaymentIntent() {
+            submitted = true;
             return {
               action: {
                 type: "process_payment_intent",
@@ -180,7 +190,9 @@ describe("TerminalService", () => {
           return { id: "pi_example", status: "requires_payment_method" };
         },
         async retrieve() {
-          return { id: "pi_example", status: "succeeded", amount: 765, currency: "eur" };
+          return submitted
+            ? { id: "pi_example", status: "succeeded", amount: 765, currency: "eur" }
+            : { id: "pi_example", status: "requires_payment_method" };
         },
       },
     };
@@ -195,6 +207,44 @@ describe("TerminalService", () => {
     });
 
     assert.equal(intent.status, "succeeded");
+  });
+
+  it("returns a retried payment that already succeeded without reprocessing it", async () => {
+    let processCalls = 0;
+    const stripe = {
+      terminal: {
+        readers: {
+          async retrieve() {
+            return { id: "tmr_v660p", device_type: "verifone_v660p", status: "online", action: null };
+          },
+          async processPaymentIntent() {
+            processCalls += 1;
+            return {};
+          },
+        },
+      },
+      paymentIntents: {
+        // Stripe replays the original response for a reused idempotency key.
+        async create() {
+          return { id: "pi_example", status: "requires_payment_method" };
+        },
+        async retrieve() {
+          return { id: "pi_example", status: "succeeded", amount: 765, currency: "eur" };
+        },
+      },
+    };
+    const service = new TerminalService(serviceConfig(), stripe);
+
+    const intent = await service.takePayment({
+      readerId: "tmr_v660p",
+      amount: 765,
+      quantity: 2,
+      discountApplied: true,
+      idempotencyKey: "retried-key",
+    });
+
+    assert.equal(intent.status, "succeeded");
+    assert.equal(processCalls, 0);
   });
 
   it("converts a browser image into a 384px, two-colour PNG", async () => {

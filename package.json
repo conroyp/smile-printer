@@ -19,5 +19,10 @@
     "express": "^5.1.0",
     "sharp": "^0.35.4",
     "stripe": "^22.6.2"
+  },
+  "homepage": "https://www.conroyp.com/articles/private-face-detection-browser-smile-discount",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/conroyp/smile-printer.git"
   }
 }

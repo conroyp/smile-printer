@@ -2,7 +2,7 @@ import { FaceDetectorClient } from "./face-detector.js";
 import { renderReceipt } from "./receipt.js";
 
 const CONFIG = {
-  steadyHoldMs: 2000,
+  steadyHoldMs: 1500,
   smileHoldMs: 1000,
   smileThreshold: 0.65,
   detectEveryMs: 80,
@@ -16,11 +16,10 @@ const CONFIG = {
 
 const EDITABLE_PHASES = new Set(["idle", "payment_failed"]);
 const DISABLED_PAY_PHASES = new Set(["paying", "printing", "complete"]);
+const PROCESSING_PHASES = new Set(["paying", "printing"]);
 const PAY_LABELS = {
   payment_unknown: "Check payment",
   print_failed: "Retry receipt",
-  paying: "Waiting for card…",
-  printing: "Printing receipt…",
   complete: "Paid & printed",
 };
 const PRINTER_ERROR_MESSAGES = {
@@ -73,6 +72,9 @@ const elements = {
   payButton: byId("payButton"),
   payLabel: byId("payLabel"),
   payAmount: byId("payAmount"),
+  paymentProgress: byId("paymentProgress"),
+  paymentProgressTitle: byId("paymentProgressTitle"),
+  paymentProgressDetail: byId("paymentProgressDetail"),
   transactionStatus: byId("transactionStatus"),
   transactionIcon: byId("transactionIcon"),
   transactionTitle: byId("transactionTitle"),
@@ -189,7 +191,7 @@ function updateOrder() {
   elements.orderNumber.textContent = `#${state.orderNumber}`;
   elements.unitPrice.textContent = `${money(CONFIG.unitPrice)} each`;
   elements.subtotal.textContent = money(amounts.subtotal);
-  elements.discount.textContent = state.discountUnlocked ? `−${money(amounts.discount)}` : "—";
+  elements.discount.textContent = state.discountUnlocked ? `−${money(amounts.discount)}` : "";
   elements.discountRow.classList.toggle("unlocked", state.discountUnlocked);
   elements.total.textContent = money(amounts.total);
   elements.payAmount.textContent = money(amounts.total);
@@ -202,19 +204,28 @@ function updateOrder() {
   elements.payAmount.hidden = Boolean(PAY_LABELS[state.phase]);
   elements.payButton.disabled =
     !state.configReady || DISABLED_PAY_PHASES.has(state.phase) || !elements.printerSelect.value;
+
+  const processing = PROCESSING_PHASES.has(state.phase);
+  elements.payButton.hidden = processing;
+  elements.paymentProgress.hidden = !processing;
+}
+
+function setPaymentProgress(title, detail) {
+  clearTransactionStatus();
+  elements.paymentProgressTitle.textContent = title;
+  elements.paymentProgressDetail.textContent = detail;
 }
 
 function setTransactionStatus(kind, title, detail) {
   elements.transactionStatus.hidden = false;
-  elements.transactionStatus.dataset.kind = kind || "pending";
+  elements.transactionStatus.dataset.kind = kind;
   elements.transactionTitle.textContent = title;
   elements.transactionDetail.textContent = detail;
-  elements.transactionIcon.textContent = kind === "success" ? "✓" : kind === "error" ? "!" : "";
+  elements.transactionIcon.textContent = kind === "success" ? "✓" : "!";
 }
 
 function clearTransactionStatus() {
   elements.transactionStatus.hidden = true;
-  elements.transactionStatus.dataset.kind = "pending";
   elements.transactionTitle.textContent = "";
   elements.transactionDetail.textContent = "";
   elements.transactionIcon.textContent = "";
@@ -410,7 +421,12 @@ function unlockDiscount(box) {
   );
   elements.receiptPreview.open = true;
   drawFaceBox(box, "green");
-  setCameraMessage("green", "10% unlocked!", "That smile just made your coffee cheaper", "✓");
+  setCameraMessage(
+    "green",
+    `${CONFIG.discountPercentage}% unlocked!`,
+    "That smile just made your coffee cheaper",
+    "✓",
+  );
   setProgress("done", 100, 100);
   renderCurrentReceipt();
   updateOrder();
@@ -678,8 +694,8 @@ async function handlePay() {
   if (!state.discountUnlocked) {
     setCameraMessage("orange", "Payment in progress", "Follow the instructions on the terminal", "→");
   }
+  setPaymentProgress("Waiting for payment", "Follow the instructions on the terminal.");
   updateOrder();
-  setTransactionStatus("", "Waiting for payment", "Follow the instructions on the terminal.");
 
   try {
     const payment = await api("/api/payments", {
@@ -709,8 +725,8 @@ async function handlePay() {
 async function printReceipt() {
   if (!state.paymentIntentId || !elements.printerSelect.value) return;
   state.phase = "printing";
+  setPaymentProgress("Payment complete", "Sending the receipt to the printer…");
   updateOrder();
-  setTransactionStatus("", "Payment complete", "Sending the receipt to the printer…");
 
   try {
     const result = await api("/api/receipts/print", {
